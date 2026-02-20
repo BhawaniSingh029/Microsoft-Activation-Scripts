@@ -10,9 +10,9 @@ on:
         required: false
         default: "miguelsolorio/vscode-symbols"
       upstream_branch:
-        description: "Upstream branch"
+        description: "Upstream branch (leave empty to use upstream repo's default branch)"
         required: false
-        default: "main"
+        default: ""
 
 jobs:
   sync:
@@ -32,6 +32,7 @@ jobs:
           else
             DEFAULT=$(curl -s "https://api.github.com/repos/${UPSTREAM_REPO}" | jq -r '.default_branch // "main"')
             echo "branch=${DEFAULT}" >> $GITHUB_OUTPUT
+            echo "Using upstream default branch: ${DEFAULT}"
           fi
 
       - name: Checkout repository
