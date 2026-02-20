@@ -2,20 +2,47 @@ name: Sync Fork
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # Runs every 6 hours
+    - cron: "0 0 * * *" # Runs every 6 hours
   workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: "Upstream repo to sync from (owner/repo)"
+        required: false
+        default: "miguelsolorio/vscode-symbols"
+      upstream_branch:
+        description: "Upstream branch"
+        required: false
+        default: "main"
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to push to main
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Sync fork
-        uses: repo-sync/github-sync@v2
+        uses: actions/checkout@v4
         with:
-          source_repo: "https://github.com/massgravel/Microsoft-Activation-Scripts.git"
-          source_branch: "main"
-          destination_branch: "main"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Add upstream and merge
+        env:
+          UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'miguelsolorio/vscode-symbols' }}
+          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" || true
+          if ! git fetch upstream "$UPSTREAM_BRANCH" 2>/dev/null; then
+            echo "::warning::Upstream not available (private, deleted, or unreachable). Skipping sync."
+            exit 0
+            # When you want email on upstream gone: use exit 1 above. After you get the email, change back to exit 0 and disable this workflow (remove schedule or turn off in Actions) so it doesn't run again.
+          fi
+          if ! git merge "upstream/${UPSTREAM_BRANCH}" --no-edit; then
+            echo "::warning::Merge failed (e.g. conflicts). Fix locally and push."
+            exit 1
+          fi
+
+      - name: Push changes
+        if: success()
+        run: git push origin main
