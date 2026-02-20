@@ -18,8 +18,22 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to push to main
+      contents: write   # needed to push
+    outputs:
+      branch: ${{ steps.get_branch.outputs.branch }}
     steps:
+      - name: Get upstream default branch
+        id: get_branch
+        env:
+          UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'miguelsolorio/vscode-symbols' }}
+        run: |
+          if [ -n "${{ github.event.inputs.upstream_branch }}" ]; then
+            echo "branch=${{ github.event.inputs.upstream_branch }}" >> $GITHUB_OUTPUT
+          else
+            DEFAULT=$(curl -s "https://api.github.com/repos/${UPSTREAM_REPO}" | jq -r '.default_branch // "main"')
+            echo "branch=${DEFAULT}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -28,7 +42,7 @@ jobs:
       - name: Add upstream and merge
         env:
           UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'miguelsolorio/vscode-symbols' }}
-          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+          UPSTREAM_BRANCH: ${{ steps.get_branch.outputs.branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -45,4 +59,4 @@ jobs:
 
       - name: Push changes
         if: success()
-        run: git push origin main
+        run: git push origin HEAD
