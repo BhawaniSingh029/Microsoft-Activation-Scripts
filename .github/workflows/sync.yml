@@ -1,16 +1,18 @@
+# Universal Sync Fork – copy this into any fork; no config needed.
+# Auto-detects: upstream repo (parent), upstream default branch (main/master/etc).
 name: Sync Fork
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Runs every 6 hours
+    - cron: "0 0 * * *"   # daily; change or remove if unwanted
   workflow_dispatch:
     inputs:
       upstream_repo:
-        description: "Upstream repo to sync from (owner/repo)"
+        description: "Upstream to sync from (owner/repo). Leave empty to use this repo's parent (fork source)."
         required: false
-        default: "miguelsolorio/vscode-symbols"
+        default: ""
       upstream_branch:
-        description: "Upstream branch (leave empty to use upstream repo's default branch)"
+        description: "Upstream branch. Leave empty to use upstream's default branch."
         required: false
         default: ""
 
@@ -18,22 +20,43 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to push
+      contents: write
     outputs:
-      branch: ${{ steps.get_branch.outputs.branch }}
+      upstream: ${{ steps.resolve.outputs.repo }}
+      branch: ${{ steps.resolve.outputs.branch }}
     steps:
-      - name: Get upstream default branch
-        id: get_branch
+      - name: Resolve upstream repo and branch
+        id: resolve
         env:
-          UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'miguelsolorio/vscode-symbols' }}
+          REPO_INPUT: ${{ github.event.inputs.upstream_repo }}
+          BRANCH_INPUT: ${{ github.event.inputs.upstream_branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ github.event.inputs.upstream_branch }}" ]; then
-            echo "branch=${{ github.event.inputs.upstream_branch }}" >> $GITHUB_OUTPUT
+          set -e
+          # Resolve upstream repo: from input or from this repo's parent (if fork)
+          if [ -n "${REPO_INPUT}" ]; then
+            UPSTREAM_REPO="${REPO_INPUT}"
+            echo "Using upstream repo from input: ${UPSTREAM_REPO}"
           else
-            DEFAULT=$(curl -s "https://api.github.com/repos/${UPSTREAM_REPO}" | jq -r '.default_branch // "main"')
-            echo "branch=${DEFAULT}" >> $GITHUB_OUTPUT
-            echo "Using upstream default branch: ${DEFAULT}"
+            PARENT=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/repos/${GITHUB_REPOSITORY}" | jq -r '.parent.full_name // empty')
+            if [ -z "${PARENT}" ]; then
+              echo "::error::This repository is not a fork. Either fork it first, or run manually and set 'upstream_repo' (owner/repo)."
+              exit 1
+            fi
+            UPSTREAM_REPO="${PARENT}"
+            echo "Using upstream repo (parent): ${UPSTREAM_REPO}"
           fi
+          echo "repo=${UPSTREAM_REPO}" >> $GITHUB_OUTPUT
+
+          # Resolve upstream branch: from input or from upstream repo's default
+          if [ -n "${BRANCH_INPUT}" ]; then
+            UPSTREAM_BRANCH="${BRANCH_INPUT}"
+            echo "Using upstream branch from input: ${UPSTREAM_BRANCH}"
+          else
+            UPSTREAM_BRANCH=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/repos/${UPSTREAM_REPO}" | jq -r '.default_branch // "main"')
+            echo "Using upstream default branch: ${UPSTREAM_BRANCH}"
+          fi
+          echo "branch=${UPSTREAM_BRANCH}" >> $GITHUB_OUTPUT
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,8 +65,8 @@ jobs:
 
       - name: Add upstream and merge
         env:
-          UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'miguelsolorio/vscode-symbols' }}
-          UPSTREAM_BRANCH: ${{ steps.get_branch.outputs.branch }}
+          UPSTREAM_REPO: ${{ steps.resolve.outputs.repo }}
+          UPSTREAM_BRANCH: ${{ steps.resolve.outputs.branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
